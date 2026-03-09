@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="__CSRF_TOKEN__">
+  <title>Git Keyboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- Status bar -->
+<div id="statusbar">
+  <span id="sb-branch">branch: …</span>
+  <span id="sb-path">…</span>
+  <span id="sb-time"></span>
+</div>
+
+<!-- Button grid -->
+<div id="grid">
+
+  <!-- INFO -->
+  <div class="group group-info">
+    <div class="group-header">Info</div>
+    <button class="btn" data-cmd="status">git status</button>
+    <button class="btn" data-cmd="log">log --oneline -20</button>
+    <button class="btn" data-cmd="branch_list">git branch</button>
+    <button class="btn" data-cmd="diff_stat">diff HEAD…origin --stat</button>
+  </div>
+
+  <!-- SYNC -->
+  <div class="group group-sync">
+    <div class="group-header">Sync</div>
+    <button class="btn" data-cmd="fetch">fetch origin</button>
+    <button class="btn" data-cmd="pull">pull origin main</button>
+    <button class="btn" data-cmd="merge">merge origin/main</button>
+  </div>
+
+  <!-- BRANCH -->
+  <div class="group group-branch">
+    <div class="group-header">Branch</div>
+    <div id="branch-buttons"><!-- filled by JS --></div>
+  </div>
+
+  <!-- COMMIT & PUSH (merged group) -->
+  <div class="group group-commit">
+    <div class="group-header">Commit &amp; Push</div>
+    <button class="btn" data-cmd="add_all">git add -A</button>
+    <div id="commit-buttons"><!-- filled by JS --></div>
+    <button class="btn" data-cmd="push_main">push origin main</button>
+    <button class="btn" data-cmd="push_u">push -u origin main</button>
+    <hr class="divider">
+    <button class="btn btn-destructive" data-cmd="reset_soft"
+            data-label="reset --soft HEAD~1">⚠ reset --soft HEAD~1</button>
+    <button class="btn btn-destructive" data-cmd="discard"
+            data-label="checkout -- .">⚠ discard all changes</button>
+  </div>
+
+</div><!-- /grid -->
+
+<!-- Output panel -->
+<div id="output-panel">
+  <div id="output-header">
+    <span id="output-cmd">— no command run yet —</span>
+    <span id="output-rc"></span>
+  </div>
+  <pre id="output-body"></pre>
+</div>
+
+<script>
+(function () {
+  // ------------------------------------------------------------------
+  // Config injected by server
+  // ------------------------------------------------------------------
+  const CONFIG = __CONFIG_JSON__;
+  const CSRF   = document.querySelector('meta[name="csrf-token"]').content;
+
+  // ------------------------------------------------------------------
+  // Build dynamic buttons
+  // ------------------------------------------------------------------
+  function makeBtn(cmd, label, classes) {
+    const b = document.createElement("button");
+    b.className = "btn" + (classes ? " " + classes : "");
+    b.dataset.cmd = cmd;
+    b.dataset.label = label;
+    b.textContent = label;
+    return b;
+  }
+
+  const branchDiv = document.getElementById("branch-buttons");
+  CONFIG.branches.forEach(branch => {
+    const key = "checkout_" + branch.replace(/[\/\-]/g, "_");
+    branchDiv.appendChild(makeBtn(key, "→ " + branch));
+  });
+
+  const commitDiv = document.getElementById("commit-buttons");
+  CONFIG.commit_messages.forEach((msg, i) => {
+    commitDiv.appendChild(makeBtn("commit_" + i, 'commit "' + msg + '"'));
+  });
+
+  // Fix status bar path display
+  document.getElementById("sb-path").textContent = CONFIG.repo_path;
+
+  // ------------------------------------------------------------------
+  // Status bar clock
+  // ------------------------------------------------------------------
+  function tick() {
+    const now = new Date();
+    document.getElementById("sb-time").textContent =
+      now.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  }
+  tick();
+  setInterval(tick, 30000);
+
+  // ------------------------------------------------------------------
+  // Fetch current branch
+  // ------------------------------------------------------------------
+  function refreshBranch() {
+    fetch("/branch", {headers: {"X-CSRF-Token": CSRF}})
+      .then(r => r.json())
+      .then(d => {
+        document.getElementById("sb-branch").textContent =
+          "branch: " + (d.branch || "?");
+      })
+      .catch(() => {});
+  }
+  refreshBranch();
+
+  // ------------------------------------------------------------------
+  // Output panel
+  // ------------------------------------------------------------------
+  function showOutput(cmdStr, stdout, stderr, rc) {
+    document.getElementById("output-cmd").textContent = "$ " + cmdStr;
+    const rcEl = document.getElementById("output-rc");
+    rcEl.textContent = rc === 0 ? "✓" : "✗ rc=" + rc;
+    rcEl.className = rc === 0 ? "rc-ok" : "rc-err";
+    const body = (stdout + (stderr ? "\n[stderr]\n" + stderr : "")).trim();
+    document.getElementById("output-body").textContent = body || "(no output)";
+    if (cmdStr.includes("branch") || cmdStr.includes("checkout") ||
+        cmdStr.includes("commit") || cmdStr.includes("reset")) {
+      refreshBranch();
+    }
+  }
+
+  function showError(msg) {
+    document.getElementById("output-cmd").textContent = "Error";
+    document.getElementById("output-rc").textContent = "✗";
+    document.getElementById("output-rc").className = "rc-err";
+    document.getElementById("output-body").textContent = msg;
+  }
+
+  // ------------------------------------------------------------------
+  // Run a command key
+  // ------------------------------------------------------------------
+  function runCmd(key) {
+    fetch("/run", {
+      method:  "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": CSRF},
+      body:    JSON.stringify({cmd: key}),
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { showError(d.error); return; }
+      showOutput(d.cmd, d.stdout, d.stderr, d.returncode);
+    })
+    .catch(e => showError("Fetch failed: " + e));
+  }
+
+  // ------------------------------------------------------------------
+  // Destructive two-click state
+  // ------------------------------------------------------------------
+  let armed = null;      // currently armed button element
+  let armTimer = null;   // auto-disarm timeout
+  let countdown = null;  // countdown interval
+
+  function disarm() {
+    if (!armed) return;
+    armed.classList.remove("btn-armed");
+    armed.textContent = armed.dataset.label
+      ? "⚠ " + armed.dataset.label
+      : armed.textContent.replace(/\s*\(\d+s\).*/, "");
+    armed.textContent = "⚠ " + (armed.dataset.label || armed.dataset.cmd);
+    armed = null;
+    clearTimeout(armTimer);
+    clearInterval(countdown);
+    armTimer = null;
+    countdown = null;
+  }
+
+  function armButton(btn) {
+    if (armed && armed !== btn) disarm();
+    armed = btn;
+    armed.classList.add("btn-armed");
+    let secs = 5;
+    armed.textContent = "Right-click to confirm (" + secs + "s)";
+    countdown = setInterval(() => {
+      secs--;
+      if (armed) armed.textContent = "Right-click to confirm (" + secs + "s)";
+    }, 1000);
+    armTimer = setTimeout(disarm, 5000);
+  }
+
+  // ------------------------------------------------------------------
+  // Button event delegation
+  // ------------------------------------------------------------------
+  document.getElementById("grid").addEventListener("click", function (e) {
+    const btn = e.target.closest("button.btn");
+    if (!btn) return;
+
+    if (btn.classList.contains("btn-destructive")) {
+      // Left-click on destructive = arm
+      armButton(btn);
+    } else {
+      runCmd(btn.dataset.cmd);
+    }
+  });
+
+  document.getElementById("grid").addEventListener("contextmenu", function (e) {
+    const btn = e.target.closest("button.btn-destructive");
+    if (!btn) return;
+    e.preventDefault();
+
+    if (armed === btn) {
+      disarm();
+      runCmd(btn.dataset.cmd);
+    } else {
+      // Right-click without arming first — arm it
+      armButton(btn);
+    }
+  });
+
+  // Long-press on touchscreens = substitute for right-click
+  let longPressTimer = null;
+  document.getElementById("grid").addEventListener("touchstart", function (e) {
+    const btn = e.target.closest("button.btn-destructive");
+    if (!btn) return;
+    longPressTimer = setTimeout(() => {
+      if (armed === btn) {
+        disarm();
+        runCmd(btn.dataset.cmd);
+      } else {
+        armButton(btn);
+      }
+    }, 500);
+  }, {passive: true});
+
+  document.getElementById("grid").addEventListener("touchend", function () {
+    clearTimeout(longPressTimer);
+  }, {passive: true});
+
+})();
+</script>
+</body>
+</html>

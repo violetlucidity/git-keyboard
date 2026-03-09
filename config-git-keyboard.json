@@ -1,0 +1,13 @@
+{
+  "repo_path": "/home/pi/my-project",
+  "port": 5000,
+  "remote": "origin",
+  "main_branch": "main",
+  "branches": ["main", "dev"],
+  "commit_messages": [
+    "wip: checkpoint",
+    "fix: bug fix",
+    "feat: new feature",
+    "docs: update readme"
+  ]
+}
