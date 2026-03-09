@@ -1,17 +1,7 @@
-### TODO
-### denote project documents
-### denote archival behavior
-### find other places where I've put instructions.
-### checkpoint system
-### code review (from module 2 sequence) including runtime integration test/running pipeline end-to-end
-### planning mode
-
-
-
 Here are some general instructions for all sessions.
 
 
-The copyable python commands that Claude generates are very helpful. There is a document called COMMANDS.MD that lists copyable terminal commands to clone and pull a GitHub repo. Please generate stepwise commands to set up and run this program and replace the existing set of stepwise commands with it. Please add any other GIT commands you feel would be helpful for active programming with Claude Code/Claude Code for Web
+The copyable python commands that Claude generates are very helpful. There is a document called COMMANDS*.MD that lists copyable terminal commands to clone and pull a GitHub repo. Please generate stepwise commands to set up and run this program and replace the existing set of stepwise commands with it. Please add any other GIT commands you feel would be helpful for active programming with Claude Code/Claude Code for Web
 
 TIMESTAMPS:
 Please update project documents such as the Bug Fix Log and Module# Workflow whenever you make changes to the scripts/programs. Please mark these documents with a timestamp in a format like: YYYY(3-letter month)DD-TTTT, where the time is in EST (e.g. 2026Feb05-2146)
@@ -103,4 +93,5 @@ Please update the version number in module script filenames when you generate th
 - Consolidate verification: apply all edits for a prompt, then run a
   single verification pass, rather than verifying after each individual
   change.
+
 
